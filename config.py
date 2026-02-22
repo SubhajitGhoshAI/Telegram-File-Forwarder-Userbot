@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+# লোকাল টেস্টিংয়ের জন্য .env ফাইল লোড করা হচ্ছে
+load_dotenv()
 
 # Environment Variables থেকে ডাটা নেওয়া হচ্ছে
 API_ID = int(os.environ.get("API_ID", "0"))
