@@ -3,7 +3,7 @@ import logging
 import time
 from aiohttp import web
 from pyrogram import Client, filters, idle
-from pyrogram.errors import FloodWait, RPCError
+from pyrogram.errors import FloodWait
 from config import API_ID, API_HASH, SESSION_STRING, SOURCE_CHANNELS, DESTINATION_CHANNEL, PORT
 from database import db
 
@@ -36,7 +36,7 @@ async def web_server():
     logger.info(f"Web server started on port {PORT}")
 
 # --- Message Listener ---
-# শুধুমাত্র ভিডিও এবং ফাইল (ডকুমেন্ট) ধরবে
+# শুধুমাত্র ভিডিও এবং ফাইল (ডকুমেন্ট) ধরবে। ছবি বা টেক্সট চাইলে `| filters.photo | filters.text` যোগ করতে পারো।
 @app.on_message(filters.chat(SOURCE_CHANNELS) & (filters.document | filters.video))
 async def incoming_handler(client, message):
     # বট স্টার্ট হওয়ার আগের মেসেজ ইগনোর করবে
@@ -67,7 +67,8 @@ async def worker_loop():
                     try:
                         logger.info(f"Forwarding Msg {task['message_id']} from {channel_id}")
                         
-                        # copy_message ব্যবহার করা হলো যাতে ক্যাপশন সহ যায়
+                        # copy_message ব্যবহার করা হলো যাতে "Forwarded from" ট্যাগ না থাকে।
+                        # যদি অরিজিনাল ফরোয়ার্ড ট্যাগ চাও, তাহলে `app.forward_messages` ব্যবহার করতে হবে।
                         await app.copy_message(
                             chat_id=DESTINATION_CHANNEL,
                             from_chat_id=task['chat_id'],
@@ -88,8 +89,8 @@ async def worker_loop():
                         # যদি সোর্স মেসেজ ডিলিট হয়ে যায় বা অন্য এরর হয়, তবুও কিউ থেকে সরিয়ে দেওয়া হবে যাতে লুপ না আটকায়
                         await db.remove_from_queue(task['_id'])
             
-            # সব চ্যানেলের কাজ শেষ হলে ১ সেকেন্ড বিশ্রাম নিয়ে আবার চেক করবে
-            await asyncio.sleep(1)
+            # সব চ্যানেলের কাজ শেষ হলে ৩ সেকেন্ড বিশ্রাম নিয়ে আবার চেক করবে (MongoDB তে লোড কমাতে)
+            await asyncio.sleep(3)
             
         except Exception as e:
             logger.error(f"Critical Worker Error: {e}")
@@ -108,5 +109,6 @@ async def main():
     )
 
 if __name__ == "__main__":
+    # Python 3.10+ এর জন্য asyncio.run() ব্যবহার করা ভালো, তবে তোমার কোডটিও ঠিক আছে।
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
