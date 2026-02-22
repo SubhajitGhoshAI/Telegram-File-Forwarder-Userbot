@@ -36,7 +36,7 @@ async def web_server():
     logger.info(f"Web server started on port {PORT}")
 
 # --- Message Listener ---
-# শুধুমাত্র ভিডিও এবং ফাইল (ডকুমেন্ট) ধরবে। ছবি বা টেক্সট চাইলে `| filters.photo | filters.text` যোগ করতে পারো।
+# শুধুমাত্র ভিডিও এবং ফাইল (ডকুমেন্ট) ধরবে।
 @app.on_message(filters.chat(SOURCE_CHANNELS) & (filters.document | filters.video))
 async def incoming_handler(client, message):
     # বট স্টার্ট হওয়ার আগের মেসেজ ইগনোর করবে
@@ -53,22 +53,19 @@ async def worker_loop():
     while True:
         try:
             # আমরা সোর্স চ্যানেলগুলোর লিস্ট ধরে লুপ চালাবো
-            # ১ নম্বর চ্যানেল শেষ হলে তবেই ২ নম্বরে যাবে
             for channel_id in SOURCE_CHANNELS:
                 while True:
-                    # এই চ্যানেলের কোনো পেন্ডিং ফাইল আছে কিনা চেক করা
-                    task = await db.get_next_from_channel(channel_id)
-                    
-                    if not task:
-                        # যদি এই চ্যানেলে আর কোনো ফাইল না থাকে, লুপ ব্রেক করে পরের চ্যানেলে যাবে
-                        break 
-                    
-                    # ফাইল পাঠানো শুরু
                     try:
+                        # এই চ্যানেলের কোনো পেন্ডিং ফাইল আছে কিনা চেক করা (DB Error Handle করার জন্য try এর ভেতরে)
+                        task = await db.get_next_from_channel(channel_id)
+                        
+                        if not task:
+                            # যদি এই চ্যানেলে আর কোনো ফাইল না থাকে, লুপ ব্রেক করে পরের চ্যানেলে যাবে
+                            break 
+                        
+                        # ফাইল পাঠানো শুরু
                         logger.info(f"Forwarding Msg {task['message_id']} from {channel_id}")
                         
-                        # copy_message ব্যবহার করা হলো যাতে "Forwarded from" ট্যাগ না থাকে।
-                        # যদি অরিজিনাল ফরোয়ার্ড ট্যাগ চাও, তাহলে `app.forward_messages` ব্যবহার করতে হবে।
                         await app.copy_message(
                             chat_id=DESTINATION_CHANNEL,
                             from_chat_id=task['chat_id'],
@@ -78,18 +75,21 @@ async def worker_loop():
                         # সফল হলে ডাটাবেস থেকে মুছে ফেলা
                         await db.remove_from_queue(task['_id'])
                         
-                        # ৩ সেকেন্ড ডিলে (User Requirement)
+                        # ৩ সেকেন্ড ডিলে
                         await asyncio.sleep(3)
                         
                     except FloodWait as e:
                         logger.warning(f"FloodWait hit! Sleeping for {e.value} seconds.")
                         await asyncio.sleep(e.value)
                     except Exception as e:
-                        logger.error(f"Error processing message: {e}")
-                        # যদি সোর্স মেসেজ ডিলিট হয়ে যায় বা অন্য এরর হয়, তবুও কিউ থেকে সরিয়ে দেওয়া হবে যাতে লুপ না আটকায়
-                        await db.remove_from_queue(task['_id'])
+                        logger.error(f"Worker Error: {e}")
+                        # যদি সোর্স মেসেজ ডিলিট হয়ে যায় বা অন্য এরর হয়, তাহলে স্কিপ করে মুছে ফেলবে
+                        if 'task' in locals() and task:
+                            logger.info("Skipping broken message")
+                            await db.remove_from_queue(task['_id'])
+                        await asyncio.sleep(5)
             
-            # সব চ্যানেলের কাজ শেষ হলে ৩ সেকেন্ড বিশ্রাম নিয়ে আবার চেক করবে (MongoDB তে লোড কমাতে)
+            # সব চ্যানেলের কাজ শেষ হলে ৩ সেকেন্ড বিশ্রাম নিয়ে আবার চেক করবে
             await asyncio.sleep(3)
             
         except Exception as e:
@@ -109,6 +109,5 @@ async def main():
     )
 
 if __name__ == "__main__":
-    # Python 3.10+ এর জন্য asyncio.run() ব্যবহার করা ভালো, তবে তোমার কোডটিও ঠিক আছে।
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
